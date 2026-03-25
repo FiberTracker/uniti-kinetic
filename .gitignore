@@ -1,0 +1,7 @@
+fcc_data/*.csv
+fcc_data/*.zip
+fcc_data/*.headers
+fcc_data/polygon_cache.json
+.env
+.DS_Store
+__pycache__/

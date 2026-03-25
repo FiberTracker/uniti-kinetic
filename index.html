@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FTTH Dashboard | Uniti / Kinetic Competitive Landscape</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+        #auth-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+            z-index: 99999; display: flex; align-items: center; justify-content: center;
+        }
+        #auth-overlay.hidden { display: none; }
+        .auth-box {
+            background: #1E293B; border: 1px solid #334155; border-radius: 12px;
+            padding: 40px; width: 380px; text-align: center; box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+        }
+        .auth-box h2 { color: #F1F5F9; font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+        .auth-box p { color: #94A3B8; font-size: 13px; margin-bottom: 24px; }
+        .auth-box input {
+            width: 100%; padding: 10px 14px; background: #0F172A; border: 1px solid #475569;
+            border-radius: 8px; color: #F1F5F9; font-size: 14px; outline: none; transition: border-color 0.2s;
+        }
+        .auth-box input:focus { border-color: #4972AC; }
+        .auth-box input::placeholder { color: #64748B; }
+        .auth-box button {
+            width: 100%; margin-top: 12px; padding: 10px; background: #4972AC;
+            color: white; border: none; border-radius: 8px; font-size: 14px;
+            font-weight: 600; cursor: pointer; transition: background 0.2s;
+        }
+        .auth-box button:hover { background: #2E476B; }
+        .auth-error { color: #F87171; font-size: 12px; margin-top: 8px; display: none; }
+        #map { height: 650px; width: 100%; border-radius: 12px; }
+        .leaflet-popup-content-wrapper { border-radius: 8px; }
+        .leaflet-popup-content { margin: 12px 16px; min-width: 280px; max-width: 380px; }
+        .stat-card { border-left: 3px solid; }
+        .tab-btn { transition: all 0.2s; cursor: pointer; border-bottom: 3px solid transparent; }
+        .tab-btn.active { border-bottom-color: #4972AC; color: #4972AC; font-weight: 600; }
+        .tab-btn:hover:not(.active) { color: #334155; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .scrollbar-thin::-webkit-scrollbar { width: 4px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #CBD5E1; border-radius: 2px; }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+        .modal-content { background: white; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto; }
+        .collapsible-header { cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .collapsible-header::after { content: '\25BC'; font-size: 12px; transition: transform 0.3s; }
+        .collapsible-header.collapsed::after { transform: rotate(-90deg); }
+        .collapsible-content { transition: max-height 0.3s ease-out; overflow: hidden; }
+        .collapsible-content.collapsed { max-height: 0 !important; padding: 0 !important; }
+        @media (max-width: 768px) {
+            body { padding: 8px; }
+            #map { height: 50vh; min-height: 300px; border-radius: 8px; }
+            .leaflet-popup-content { min-width: 240px; margin: 8px 12px; font-size: 13px; }
+            .mobile-hidden { display: none !important; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-2 md:p-4">
+
+    <!-- Password Protection -->
+    <div id="auth-overlay">
+        <div class="auth-box">
+            <div style="margin-bottom: 16px;">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#4972AC" stroke-width="1.5" style="margin: 0 auto;">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+            </div>
+            <h2>FTTH Dashboard</h2>
+            <p>Restricted access &mdash; enter password to continue</p>
+            <form onsubmit="return checkAuth()">
+                <input type="password" id="auth-input" placeholder="Password" autocomplete="off" autofocus />
+                <button type="submit">Unlock</button>
+            </form>
+            <div id="auth-error" class="auth-error">Incorrect password. Try again.</div>
+        </div>
+    </div>
+    <script>
+        function checkAuth() {
+            var input = document.getElementById('auth-input').value;
+            if (simpleHash(input) === '645e2cbf645e2cbf') {
+                document.getElementById('auth-overlay').classList.add('hidden');
+                sessionStorage.setItem('uk_auth', '1');
+                return false;
+            }
+            document.getElementById('auth-error').style.display = 'block';
+            document.getElementById('auth-input').value = '';
+            document.getElementById('auth-input').focus();
+            return false;
+        }
+        function simpleHash(s) {
+            var h = 0x5f2a1e3d;
+            for (var i = 0; i < s.length; i++) {
+                h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+            }
+            return (h >>> 0).toString(16).padStart(8, '0') + h.toString(16).slice(-8);
+        }
+        if (sessionStorage.getItem('uk_auth') === '1') {
+            document.getElementById('auth-overlay').classList.add('hidden');
+        }
+    </script>
+
+    <!-- Data & Logic -->
+    <script src="data.js"></script>
+    <script src="calculations.js"></script>
+
+    <!-- BDC data loaded async -->
+    <script>
+    var BDC_DATA = {};
+    function loadBDCScripts() {
+        const files = [
+            { file: 'bdc_output/kinetic_bdc.js', varName: 'KINETIC_BDC_COVERAGE', key: 'kinetic' },
+            { file: 'bdc_output/att_bdc.js', varName: 'ATT_BDC_COVERAGE', key: 'att' },
+            { file: 'bdc_output/verizon_bdc.js', varName: 'VZ_BDC_COVERAGE', key: 'verizon' },
+            { file: 'bdc_output/frontier_bdc.js', varName: 'FRONTIER_BDC_COVERAGE', key: 'frontier' },
+            { file: 'bdc_output/metronet_bdc.js', varName: 'METRONET_BDC_COVERAGE', key: 'metronet' },
+        ];
+        let loaded = 0;
+        let total = files.length;
+        files.forEach(f => {
+            const s = document.createElement('script');
+            s.src = f.file + '?v=1';
+            s.async = true;
+            s.onload = () => {
+                loaded++;
+                if (window[f.varName]) BDC_DATA[f.key] = window[f.varName];
+                updateBDCStatus(loaded, total);
+                if (loaded === total) renderAllBDC();
+            };
+            s.onerror = () => {
+                loaded++;
+                updateBDCStatus(loaded, total);
+                if (loaded === total) renderAllBDC();
+            };
+            document.head.appendChild(s);
+        });
+    }
+    function updateBDCStatus(loaded, total) {
+        const el = document.getElementById('bdcStats');
+        if (el) {
+            const count = Object.keys(BDC_DATA).length;
+            el.textContent = loaded < total ? `Loading BDC... (${loaded}/${total})` : `${count} providers loaded`;
+        }
+    }
+    </script>
+
+    <div class="max-w-[1440px] mx-auto">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-slate-800 via-slate-700 to-blue-900 rounded-xl p-3 md:p-5 mb-3 text-white">
+            <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-2">
+                <div>
+                    <p class="text-blue-400 text-[10px] md:text-xs font-semibold tracking-widest mb-1">GIS INTELLIGENCE TOOL</p>
+                    <h1 class="text-lg md:text-2xl font-extrabold">FTTH Dashboard</h1>
+                    <p class="text-slate-300 text-xs md:text-sm mt-1">Uniti / Kinetic Competitive Landscape | 18 States | Carrier Overlap Analysis</p>
+                </div>
+                <div class="text-left md:text-right text-xs">
+                    <p class="text-slate-400">Sources: FCC BDC J25, Company Filings, Market Intel</p>
+                    <p class="text-white font-semibold">March 2026</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Key Stats Banner -->
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-2 mb-3">
+            <div class="bg-white rounded-xl shadow-sm p-3 stat-card" style="border-left-color:#4972AC">
+                <p class="text-[10px] text-slate-500 mb-1">Kinetic Fiber Passings</p>
+                <p class="text-xl font-bold text-slate-800">~2M</p>
+                <p class="text-[10px] text-slate-400">18-state ILEC footprint</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-3 stat-card" style="border-left-color:#B98E2C">
+                <p class="text-[10px] text-slate-500 mb-1">Uniti Cash Generation</p>
+                <p class="text-xl font-bold text-slate-800">$300M/yr</p>
+                <p class="text-[10px] text-slate-400">Dark fiber segment</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-3 stat-card" style="border-left-color:#469A6C">
+                <p class="text-[10px] text-slate-500 mb-1">Avg Customer Tenure</p>
+                <p class="text-xl font-bold text-slate-800">23 yrs</p>
+                <p class="text-[10px] text-slate-400">84% retained &gt;10yr</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-3 stat-card" style="border-left-color:#DC2626">
+                <p class="text-[10px] text-slate-500 mb-1">HIGH Risk Markets</p>
+                <p class="text-xl font-bold text-slate-800" id="highRiskCount">—</p>
+                <p class="text-[10px] text-slate-400">Multi-carrier overlap</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-3 stat-card" style="border-left-color:#009FDB">
+                <p class="text-[10px] text-slate-500 mb-1">AT&T Overlapping States</p>
+                <p class="text-xl font-bold text-slate-800">12 / 18</p>
+                <p class="text-[10px] text-slate-400">Largest competitive threat</p>
+            </div>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="bg-white rounded-t-xl border-b flex gap-1 px-2 overflow-x-auto">
+            <button class="tab-btn active py-3 px-3 text-sm whitespace-nowrap" onclick="switchTab('map')">GIS Map</button>
+            <button class="tab-btn py-3 px-3 text-sm text-slate-500 whitespace-nowrap" onclick="switchTab('commercial')">Commercial Fiber</button>
+            <button class="tab-btn py-3 px-3 text-sm text-slate-500 whitespace-nowrap" onclick="switchTab('att-overlap')">AT&T Overlap</button>
+            <button class="tab-btn py-3 px-3 text-sm text-slate-500 whitespace-nowrap" onclick="switchTab('vz-overlap')">VZ / Frontier</button>
+            <button class="tab-btn py-3 px-3 text-sm text-slate-500 whitespace-nowrap" onclick="switchTab('tmo-overlap')">T-Mobile Portfolio</button>
+            <button class="tab-btn py-3 px-3 text-sm text-slate-500 whitespace-nowrap" onclick="switchTab('profiles')">Operator Profiles</button>
+            <button class="tab-btn py-3 px-3 text-sm text-slate-500 whitespace-nowrap" onclick="switchTab('matrix')">Overlap Matrix</button>
+        </div>
+
+        <!-- ========== TAB 1: GIS MAP ========== -->
+        <div id="tab-map" class="tab-content active">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 mt-3">
+                <div class="lg:col-span-9">
+                    <div class="bg-white rounded-xl shadow-sm p-3 md:p-4">
+                        <!-- BDC Toggles -->
+                        <div class="mb-2 pb-2 border-b border-slate-100">
+                            <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                <span class="text-[10px] text-slate-500 font-semibold uppercase tracking-wider mr-1">FCC BDC:</span>
+                                <button onclick="toggleBDCLayer('kinetic')" id="bdc-btn-kinetic" class="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style="background:#4972AC;color:white;">Kinetic</button>
+                                <button onclick="toggleBDCLayer('att')" id="bdc-btn-att" class="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style="background:#009FDB;color:white;">AT&T</button>
+                                <button onclick="toggleBDCLayer('verizon')" id="bdc-btn-verizon" class="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style="background:#EE0000;color:white;">Verizon</button>
+                                <button onclick="toggleBDCLayer('frontier')" id="bdc-btn-frontier" class="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style="background:#E60000;color:white;">Frontier</button>
+                                <button onclick="toggleBDCLayer('metronet')" id="bdc-btn-metronet" class="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style="background:#B98E2C;color:white;">MetroNet</button>
+                                <span id="bdcStats" class="text-[10px] text-slate-400 ml-2">Loading...</span>
+                            </div>
+                        </div>
+                        <!-- Provider Filters -->
+                        <div class="flex flex-wrap gap-1.5 mb-2 overflow-x-auto pb-1" id="filterBar"></div>
+                        <!-- Region Buttons -->
+                        <div class="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide mb-2" id="regionButtons"></div>
+                        <!-- Map -->
+                        <div class="relative"><div id="map"></div></div>
+                        <!-- Legend -->
+                        <div class="mt-3 flex flex-wrap gap-3 text-xs text-slate-600" id="legendBar"></div>
+                    </div>
+                </div>
+
+                <!-- Right Sidebar -->
+                <div class="lg:col-span-3 space-y-3">
+                    <!-- Risk Summary -->
+                    <div class="bg-red-50 rounded-xl shadow-sm p-3 border border-red-200">
+                        <h3 class="font-semibold text-red-700 text-sm mb-2">Highest Risk Overlaps</h3>
+                        <div class="space-y-2 text-xs" id="riskSummary"></div>
+                    </div>
+
+                    <!-- Uniti Value -->
+                    <div class="bg-blue-50 rounded-xl shadow-sm p-3 border border-blue-200">
+                        <h3 class="font-semibold text-blue-700 text-sm mb-2">Uniti Key Metrics</h3>
+                        <div class="text-xs text-blue-600 space-y-1">
+                            <p><strong>Annual Cash:</strong> $300M (only segment ahead of budget)</p>
+                            <p><strong>Tenure:</strong> 23-year avg, 84% retained &gt;10yr</p>
+                            <p><strong>Route Miles:</strong> ~200K fiber route miles</p>
+                            <p><strong>Strategic Status:</strong> Exploring alternatives</p>
+                            <p class="text-[10px] text-blue-400 mt-2">Click ${calcIcon('unitiDarkFiber')} for methodology</p>
+                        </div>
+                    </div>
+
+                    <!-- Quick Navigation -->
+                    <div class="bg-white rounded-xl shadow-sm p-3">
+                        <h3 class="font-semibold text-slate-800 text-sm mb-2">Quick Navigation</h3>
+                        <div id="quickNav" class="space-y-1"></div>
+                    </div>
+
+                    <!-- Methodology -->
+                    <div class="bg-white rounded-xl shadow-sm p-3">
+                        <h3 class="font-semibold text-slate-800 text-sm mb-2">Methodology</h3>
+                        <div class="space-y-1 text-[10px] text-slate-500">
+                            <p>Layer 1: Curated market markers from press releases, company filings, and market intelligence.</p>
+                            <p>Layer 2: FCC BDC census block group shading (tech=50, FTTP only) for each provider.</p>
+                            <p>Overlap risk: based on carrier fiber presence + expansion plans in Kinetic ILEC territory.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== TAB 2: COMMERCIAL FIBER ========== -->
+        <div id="tab-commercial" class="tab-content">
+            <div class="bg-white rounded-xl shadow-sm p-4 mt-3">
+                <h2 class="font-bold text-slate-800 text-lg mb-1">Uniti Commercial Fiber & Enterprise Services</h2>
+                <p class="text-xs text-slate-500 mb-4">Uniti's enterprise/wholesale dark fiber and lit services network — separate from Kinetic consumer ILEC</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs min-w-[700px]">
+                        <thead>
+                            <tr class="border-b text-left text-slate-500">
+                                <th class="py-2 px-3">Region</th>
+                                <th class="py-2 px-3">Key Metros</th>
+                                <th class="py-2 px-3">Approx Route Miles</th>
+                                <th class="py-2 px-3">Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody id="commercialTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                <div class="bg-blue-50 rounded-xl shadow-sm p-4 border border-blue-200">
+                    <h3 class="font-semibold text-blue-700 text-sm mb-2">Dark Fiber Business</h3>
+                    <div class="text-xs text-blue-600 space-y-1">
+                        <p><strong>Revenue model:</strong> Long-term IRUs and managed wavelength services</p>
+                        <p><strong>Customer tenure:</strong> 23-year average</p>
+                        <p><strong>Cash generation:</strong> $300M annually — only segment ahead of budget</p>
+                        <p><strong>Retention:</strong> 84% of customers retained &gt;10 years</p>
+                    </div>
+                </div>
+                <div class="bg-amber-50 rounded-xl shadow-sm p-4 border border-amber-200">
+                    <h3 class="font-semibold text-amber-700 text-sm mb-2">Enterprise Segments</h3>
+                    <div class="text-xs text-amber-600 space-y-1">
+                        <p><strong>Carrier wholesale:</strong> Transport/backhaul for wireless carriers</p>
+                        <p><strong>Enterprise lit:</strong> Managed fiber to large enterprises</p>
+                        <p><strong>Data center connectivity:</strong> Major DC interconnection</p>
+                        <p><strong>Government/education:</strong> E-Rate and SLED</p>
+                    </div>
+                </div>
+                <div class="bg-emerald-50 rounded-xl shadow-sm p-4 border border-emerald-200">
+                    <h3 class="font-semibold text-emerald-700 text-sm mb-2">Valuation Implications</h3>
+                    <div class="text-xs text-emerald-600 space-y-1">
+                        <p><strong>SOTP approach:</strong> Dark fiber/enterprise valued separately from Kinetic ILEC</p>
+                        <p><strong>Commercial fiber comp:</strong> Segra at 11.0x EBITDA</p>
+                        <p><strong>Kinetic fiber comp:</strong> $2,300-2,800/HHP range</p>
+                        <p class="text-[10px] mt-2">Click ${calcIcon('kineticValuation')} for full methodology</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== TAB 3: AT&T OVERLAP ========== -->
+        <div id="tab-att-overlap" class="tab-content">
+            <div class="bg-white rounded-xl shadow-sm p-4 mt-3">
+                <h2 class="font-bold text-slate-800 text-lg mb-1">AT&T Fiber Overlap Analysis</h2>
+                <p class="text-xs text-slate-500 mb-3">AT&T (BDC 130077) + Lumen acquisition (Feb 2026) vs Kinetic (131413) across 18 states</p>
+                <div class="bg-red-50 rounded-lg p-3 mb-4">
+                    <p class="text-xs text-red-700 font-semibold">RISK ASSESSMENT: HIGH — AT&T overlaps in 12 of 18 Kinetic states</p>
+                    <p class="text-[10px] text-red-600 mt-1">BellSouth legacy ILEC territory (AL, GA, FL, SC, NC, MS) creates direct competitive overlap. Lumen mass-market acquisition (Feb 2026) adds additional fiber footprint in Kinetic states. AT&T targeting 60M HHP by 2030.</p>
+                    <p class="text-[10px] text-red-500 mt-1">Click ${calcIcon('attOverlapRisk')} for full analysis</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">AT&T ILEC States (Kinetic Overlap)</h3>
+                        <div class="space-y-1 text-xs" id="attOverlapStates"></div>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Lumen Assets Added (Feb 2026)</h3>
+                        <div class="text-xs text-slate-600 space-y-1">
+                            <p>AT&T acquired Lumen's mass-market fiber assets across 18 states for $1,437/HHP.</p>
+                            <p>This extends AT&T's FTTP footprint into previously Lumen/CenturyLink ILEC territory — much of which overlaps Kinetic states (MN, MO, NE, IA, AR, NM, NC).</p>
+                            <p class="font-semibold text-red-600 mt-2">Net effect: AT&T is now the dominant fiber competitor in virtually every Kinetic state.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-4 mt-3">
+                <h3 class="font-semibold text-slate-800 text-sm mb-2">AT&T vs Kinetic — Market-Level Overlap</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs min-w-[600px]">
+                        <thead><tr class="border-b text-left text-slate-500">
+                            <th class="py-2 px-3">Market</th><th class="py-2 px-3">State</th>
+                            <th class="py-2 px-3">AT&T Status</th><th class="py-2 px-3">Kinetic Status</th>
+                            <th class="py-2 px-3">Risk</th><th class="py-2 px-3">Notes</th>
+                        </tr></thead>
+                        <tbody id="attOverlapTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== TAB 4: VZ / FRONTIER OVERLAP ========== -->
+        <div id="tab-vz-overlap" class="tab-content">
+            <div class="bg-white rounded-xl shadow-sm p-4 mt-3">
+                <h2 class="font-bold text-slate-800 text-lg mb-1">Verizon / Frontier Overlap Analysis</h2>
+                <p class="text-xs text-slate-500 mb-3">Verizon Fios (131425) + Frontier (130258, pending $20B VZ acquisition) vs Kinetic</p>
+                <div class="bg-amber-50 rounded-lg p-3 mb-4">
+                    <p class="text-xs text-amber-700 font-semibold">RISK ASSESSMENT: HIGH in NY/PA — Medium elsewhere</p>
+                    <p class="text-[10px] text-amber-600 mt-1">Verizon Fios has significant overlap in NY and PA where Kinetic has ILEC territory. Pending $20B Frontier acquisition (26.6x EBITDA) will combine Fios + Frontier into dominant NE/Mid-Atlantic fiber platform. Frontier also present in OH, NC, MN, AR, and other Kinetic states.</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Verizon Fios Overlap</h3>
+                        <div class="text-xs text-slate-600 space-y-1">
+                            <p><strong>Primary overlap:</strong> NY (Buffalo, Syracuse), PA (State College, Reading)</p>
+                            <p><strong>Fios HHP:</strong> ~30M total, concentrated in NE/Mid-Atlantic</p>
+                            <p><strong>Eden Fiber JV:</strong> 45% pen guarantee yr5 — signals aggressive growth</p>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-semibold text-slate-700 mb-2">Frontier Overlap</h3>
+                        <div class="text-xs text-slate-600 space-y-1">
+                            <p><strong>Overlap states:</strong> NY, PA, OH, NC, MN, AL, AR, FL, GA, MS, IA, NE, SC, TX</p>
+                            <p><strong>Fiber HHP:</strong> ~7.2M (and growing with copper-to-fiber upgrade)</p>
+                            <p><strong>Post-VZ close:</strong> Combined entity will have largest fiber footprint in NE</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-4 mt-3">
+                <h3 class="font-semibold text-slate-800 text-sm mb-2">VZ + Frontier vs Kinetic — Market-Level Overlap</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs min-w-[600px]">
+                        <thead><tr class="border-b text-left text-slate-500">
+                            <th class="py-2 px-3">Market</th><th class="py-2 px-3">State</th>
+                            <th class="py-2 px-3">VZ/Frontier Status</th><th class="py-2 px-3">Kinetic Status</th>
+                            <th class="py-2 px-3">Risk</th><th class="py-2 px-3">Notes</th>
+                        </tr></thead>
+                        <tbody id="vzOverlapTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== TAB 5: T-MOBILE PORTFOLIO ========== -->
+        <div id="tab-tmo-overlap" class="tab-content">
+            <div class="bg-white rounded-xl shadow-sm p-4 mt-3">
+                <h2 class="font-bold text-slate-800 text-lg mb-1">T-Mobile Fiber Portfolio Overlap</h2>
+                <p class="text-xs text-slate-500 mb-3">MetroNet (131081, KKR/Oak Hill — T-Mo JV pending) + Lumos (EQT — T-Mo interest) vs Kinetic</p>
+                <div class="bg-violet-50 rounded-lg p-3 mb-4">
+                    <p class="text-xs text-violet-700 font-semibold">RISK ASSESSMENT: MEDIUM — Growing threat in OH, KY, IA, MN, NC</p>
+                    <p class="text-[10px] text-violet-600 mt-1">MetroNet is building 500K passings/yr and expanding into multiple Kinetic states (OH, KY, IA, MN). T-Mobile JV pending but delayed by regulatory/insurance issues. Lumos (EQT) targeting NC/SC expansion — potential T-Mobile portfolio co. Click ${calcIcon('tmoPortfolioRisk')} for analysis.</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div class="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                        <h3 class="text-sm font-semibold text-amber-700 mb-2">MetroNet (KKR / Oak Hill)</h3>
+                        <div class="text-xs text-amber-600 space-y-1">
+                            <p><strong>HHP:</strong> 2M+ (building 500K/yr)</p>
+                            <p><strong>T-Mo valuation:</strong> $4,900/HHP (25.0x EBITDA)</p>
+                            <p><strong>Kinetic overlap:</strong> OH (Columbus), KY (Lexington), IA (Iowa City), MN (Twin Cities, Rochester)</p>
+                            <p><strong>JV status:</strong> Regulatory delay — insurance structure blocking</p>
+                        </div>
+                    </div>
+                    <div class="bg-green-50 rounded-lg p-3 border border-green-200">
+                        <h3 class="text-sm font-semibold text-green-700 mb-2">Lumos Networks (EQT)</h3>
+                        <div class="text-xs text-green-600 space-y-1">
+                            <p><strong>Focus:</strong> VA/NC/SC FTTH</p>
+                            <p><strong>CEO:</strong> Brian Stading</p>
+                            <p><strong>Kinetic overlap:</strong> NC (Raleigh, Greensboro), SC (expanding)</p>
+                            <p><strong>T-Mobile:</strong> Potential portfolio fiber co alongside MetroNet</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-4 mt-3">
+                <h3 class="font-semibold text-slate-800 text-sm mb-2">T-Mo Portfolio vs Kinetic — Market-Level Overlap</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs min-w-[600px]">
+                        <thead><tr class="border-b text-left text-slate-500">
+                            <th class="py-2 px-3">Market</th><th class="py-2 px-3">State</th>
+                            <th class="py-2 px-3">MetroNet</th><th class="py-2 px-3">Lumos</th>
+                            <th class="py-2 px-3">Kinetic Status</th><th class="py-2 px-3">Notes</th>
+                        </tr></thead>
+                        <tbody id="tmoOverlapTable"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== TAB 6: OPERATOR PROFILES ========== -->
+        <div id="tab-profiles" class="tab-content">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mt-3" id="profileCards"></div>
+        </div>
+
+        <!-- ========== TAB 7: OVERLAP MATRIX ========== -->
+        <div id="tab-matrix" class="tab-content">
+            <div class="bg-white rounded-xl shadow-sm p-4 mt-3">
+                <h2 class="font-bold text-slate-800 text-lg mb-3">Competitive Overlap Matrix</h2>
+                <p class="text-xs text-slate-500 mb-3">Market-by-operator presence. Focus: competitive risk to Kinetic fiber footprint.</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs min-w-[1000px]">
+                        <thead>
+                            <tr class="border-b text-left text-slate-500">
+                                <th class="py-2 px-3">Market</th>
+                                <th class="py-2 px-3">State</th>
+                                <th class="py-2 px-2 text-center" style="color:#4972AC">KIN</th>
+                                <th class="py-2 px-2 text-center" style="color:#009FDB">ATT</th>
+                                <th class="py-2 px-2 text-center" style="color:#EE0000">VZ</th>
+                                <th class="py-2 px-2 text-center" style="color:#E60000">FTR</th>
+                                <th class="py-2 px-2 text-center" style="color:#B98E2C">MET</th>
+                                <th class="py-2 px-2 text-center" style="color:#469A6C">LUM</th>
+                                <th class="py-2 px-2 text-center" style="color:#0072CE">SPE</th>
+                                <th class="py-2 px-3">Risk</th>
+                                <th class="py-2 px-3">Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody id="overlapTableBody"></tbody>
+                    </table>
+                </div>
+                <div class="mt-4 flex flex-wrap gap-3 text-[10px] text-slate-500">
+                    <span><span class="inline-block w-3 h-3 rounded-full bg-green-500 mr-1"></span>Core</span>
+                    <span><span class="inline-block w-3 h-3 rounded-full bg-blue-400 mr-1"></span>Active</span>
+                    <span><span class="inline-block w-3 h-3 rounded-full bg-amber-500 mr-1"></span>Expanding</span>
+                    <span><span class="inline-block w-3 h-3 rounded-full bg-violet-400 mr-1"></span>Planned</span>
+                    <span><span class="inline-block w-3 h-3 rounded-full bg-slate-300 mr-1"></span>Limited</span>
+                </div>
+            </div>
+
+            <!-- Comp Table -->
+            <div class="bg-white rounded-xl shadow-sm p-4 mt-3">
+                <h2 class="font-bold text-slate-800 text-lg mb-3">Relevant Transaction Comps</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs min-w-[700px]">
+                        <thead><tr class="border-b text-left text-slate-500">
+                            <th class="py-2 px-3">Transaction</th>
+                            <th class="py-2 px-3">$/HHP</th>
+                            <th class="py-2 px-3">EBITDA Multiple</th>
+                            <th class="py-2 px-3">Date</th>
+                            <th class="py-2 px-3">Notes</th>
+                        </tr></thead>
+                        <tbody id="compTableBody"></tbody>
+                    </table>
+                    <p class="text-[10px] text-slate-400 mt-2">Source: Public filings, market intel</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calculation Modal -->
+    <div id="calcModal" class="modal-overlay hidden" onclick="if(event.target===this)closeCalcModal()">
+        <div class="modal-content">
+            <div class="flex justify-between items-center p-3 border-b">
+                <span class="text-xs font-semibold text-slate-500">METHODOLOGY</span>
+                <button onclick="closeCalcModal()" class="text-slate-400 hover:text-slate-600 text-lg">&times;</button>
+            </div>
+            <div id="calcModalBody"></div>
+        </div>
+    </div>
+
+    <script>
+    // ============================================
+    // TAB SWITCHING
+    // ============================================
+    const TAB_NAMES = ['map','commercial','att-overlap','vz-overlap','tmo-overlap','profiles','matrix'];
+    function switchTab(tabName) {
+        TAB_NAMES.forEach((name, i) => {
+            const tab = document.getElementById('tab-' + name);
+            const btn = document.querySelectorAll('.tab-btn')[i];
+            if (name === tabName) {
+                tab.classList.add('active');
+                btn.classList.add('active');
+                btn.classList.remove('text-slate-500');
+            } else {
+                tab.classList.remove('active');
+                btn.classList.remove('active');
+                btn.classList.add('text-slate-500');
+            }
+        });
+        if (tabName === 'map') setTimeout(() => map.invalidateSize(), 100);
+    }
+
+    function toggleCollapsible(header) {
+        header.classList.toggle('collapsed');
+        header.nextElementSibling.classList.toggle('collapsed');
+    }
+
+    // ============================================
+    // MAP INITIALIZATION — centered on US
+    // ============================================
+    const map = L.map('map', { preferCanvas: true }).setView([37.5, -90.0], 5);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19
+    }).addTo(map);
+    L.control.scale({ imperial: true, metric: true }).addTo(map);
+
+    // Layer groups
+    const providerLayers = {};
+    Object.keys(PROVIDERS).forEach(k => { providerLayers[k] = L.layerGroup().addTo(map); });
+    const providerVisible = {};
+    Object.keys(PROVIDERS).forEach(k => { providerVisible[k] = true; });
+
+    // ============================================
+    // RENDER MARKET MARKERS
+    // ============================================
+    MARKETS.forEach(m => {
+        const prov = PROVIDERS[m.provider];
+        if (!prov) return;
+        const marker = L.circleMarker([m.lat, m.lng], {
+            radius: m.size || 8,
+            fillColor: prov.color,
+            color: '#fff',
+            weight: 1.5,
+            opacity: 1,
+            fillOpacity: 0.75,
+        });
+        marker.bindPopup(mapPopupHTML(m), { maxWidth: 380 });
+        providerLayers[m.provider].addLayer(marker);
+    });
+
+    // ============================================
+    // PROVIDER FILTER BAR
+    // ============================================
+    function renderFilterBar() {
+        const bar = document.getElementById('filterBar');
+        bar.innerHTML = '';
+        ['kinetic','att','verizon','frontier','metronet','lumos'].forEach(key => {
+            const p = PROVIDERS[key];
+            if (!p) return;
+            const active = providerVisible[key];
+            const btn = document.createElement('button');
+            btn.className = 'px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all';
+            btn.style.background = active ? p.color : '#E2E8F0';
+            btn.style.color = active ? 'white' : '#94A3B8';
+            btn.innerHTML = `<span class="inline-block w-2 h-2 rounded-full mr-1" style="background:${active ? 'white' : p.color}"></span>${p.short}`;
+            btn.onclick = () => toggleProvider(key);
+            bar.appendChild(btn);
+        });
+        // Kinetic Only
+        const kinOnly = document.createElement('button');
+        kinOnly.className = 'px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-700 text-white hover:bg-slate-600 ml-2';
+        kinOnly.textContent = 'Kinetic Only';
+        kinOnly.onclick = () => {
+            Object.keys(PROVIDERS).forEach(k => {
+                providerVisible[k] = (k === 'kinetic');
+                if (providerVisible[k]) map.addLayer(providerLayers[k]);
+                else map.removeLayer(providerLayers[k]);
+            });
+            renderFilterBar();
+        };
+        bar.appendChild(kinOnly);
+        // Show All
+        const showAll = document.createElement('button');
+        showAll.className = 'px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-200 text-slate-600 hover:bg-slate-300';
+        showAll.textContent = 'All';
+        showAll.onclick = () => {
+            Object.keys(PROVIDERS).forEach(k => {
+                providerVisible[k] = true;
+                map.addLayer(providerLayers[k]);
+            });
+            renderFilterBar();
+        };
+        bar.appendChild(showAll);
+    }
+
+    function toggleProvider(key) {
+        providerVisible[key] = !providerVisible[key];
+        if (providerVisible[key]) map.addLayer(providerLayers[key]);
+        else map.removeLayer(providerLayers[key]);
+        renderFilterBar();
+    }
+
+    // ============================================
+    // REGION NAVIGATION
+    // ============================================
+    const regionLocations = {
+        overview:    { label: 'Full US View',         bg: '#1E293B', text: '#FFF', coords: [37.5, -90.0], zoom: 5 },
+        southeast:   { label: 'Southeast (AL/GA/SC)',  bg: '#4972AC', text: '#FFF', coords: [33.5, -84.5], zoom: 6 },
+        carolinas:   { label: 'Carolinas (NC/SC)',     bg: '#E60000', text: '#FFF', coords: [35.2, -80.5], zoom: 7 },
+        northeast:   { label: 'Northeast (NY/PA)',     bg: '#EE0000', text: '#FFF', coords: [42.5, -77.5], zoom: 7 },
+        ohio:        { label: 'Ohio',                  bg: '#B98E2C', text: '#FFF', coords: [40.0, -82.5], zoom: 7 },
+        midwest:     { label: 'Midwest (IA/MN/MO)',    bg: '#469A6C', text: '#FFF', coords: [41.0, -92.0], zoom: 6 },
+        south:       { label: 'South (AR/OK/TX)',      bg: '#009FDB', text: '#FFF', coords: [34.5, -95.0], zoom: 6 },
+        kentucky:    { label: 'Kentucky',              bg: '#B98E2C', text: '#FFF', coords: [38.0, -85.0], zoom: 7 },
+    };
+
+    function renderRegionButtons() {
+        const container = document.getElementById('regionButtons');
+        container.innerHTML = '';
+        Object.entries(regionLocations).forEach(([key, r]) => {
+            const btn = document.createElement('button');
+            btn.className = 'px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-all hover:opacity-80';
+            btn.style.background = r.bg;
+            btn.style.color = r.text;
+            btn.textContent = r.label;
+            btn.onclick = () => map.flyTo(r.coords, r.zoom, { duration: 0.8 });
+            container.appendChild(btn);
+        });
+    }
+
+    function renderQuickNav() {
+        const nav = document.getElementById('quickNav');
+        nav.innerHTML = '';
+        Object.entries(regionLocations).forEach(([key, r]) => {
+            const btn = document.createElement('button');
+            btn.className = 'block w-full text-left px-2 py-1.5 rounded text-xs hover:bg-slate-50 transition-colors';
+            btn.innerHTML = `<span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${r.bg}"></span>${r.label}`;
+            btn.onclick = () => map.flyTo(r.coords, r.zoom, { duration: 0.8 });
+            nav.appendChild(btn);
+        });
+    }
+
+    function renderLegend() {
+        const legend = document.getElementById('legendBar');
+        legend.innerHTML = '';
+        ['kinetic','att','verizon','frontier','metronet','lumos'].forEach(key => {
+            const p = PROVIDERS[key];
+            if (!p) return;
+            const el = document.createElement('span');
+            el.innerHTML = `<span class="inline-block w-3 h-3 rounded-full mr-1" style="background:${p.color}"></span>${p.short}`;
+            legend.appendChild(el);
+        });
+    }
+
+    // ============================================
+    // RISK SUMMARY SIDEBAR
+    // ============================================
+    function renderRiskSummary() {
+        const container = document.getElementById('riskSummary');
+        const highRisk = OVERLAP_MATRIX.filter(r => r.risk === 'HIGH');
+        document.getElementById('highRiskCount').textContent = highRisk.length;
+        container.innerHTML = '';
+        highRisk.slice(0, 6).forEach(r => {
+            const competitors = [];
+            if (r.att) competitors.push('AT&T');
+            if (r.verizon) competitors.push('VZ');
+            if (r.frontier) competitors.push('Frontier');
+            if (r.metronet) competitors.push('MetroNet');
+            if (r.lumos) competitors.push('Lumos');
+            container.innerHTML += `<div class="text-xs mb-1.5">
+                <p class="font-semibold text-red-600">${r.market} (${r.state})</p>
+                <p class="text-red-500 text-[10px]">${competitors.join(', ')}</p>
+            </div>`;
+        });
+        if (highRisk.length > 6) {
+            container.innerHTML += `<p class="text-[10px] text-red-400">+ ${highRisk.length - 6} more HIGH risk markets</p>`;
+        }
+    }
+
+    // ============================================
+    // OPERATOR PROFILE CARDS
+    // ============================================
+    function renderProfileCards() {
+        const container = document.getElementById('profileCards');
+        container.innerHTML = '';
+        OPERATOR_PROFILES.forEach(op => {
+            const prov = PROVIDERS[op.id];
+            const color = prov ? prov.color : '#6B7280';
+            const isFocus = op.id === 'kinetic';
+            let html = `<div class="bg-white rounded-xl shadow-sm p-4 ${isFocus ? 'ring-2 ring-blue-400' : ''}">
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="w-3 h-3 rounded-full" style="background:${color}"></span>
+                    <h3 class="font-bold text-slate-800">${op.name}</h3>
+                    ${isFocus ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">FOCUS</span>' : ''}
+                </div>
+                <div class="text-xs text-slate-500 mb-3">
+                    <p><strong>Sponsor:</strong> ${op.sponsor}</p>
+                    <p><strong>HQ:</strong> ${op.hq}</p>
+                    <p><strong>CEO:</strong> ${op.ceo}</p>
+                    <p><strong>States:</strong> ${op.states.join(', ')} (${op.stateCount})</p>
+                </div>
+                <div class="border-t border-slate-100 pt-2 space-y-0.5">`;
+            op.metrics.forEach(m => {
+                html += metricWithSource(m.label, m.value, m.source, m.sourceUrl);
+            });
+            html += `</div></div>`;
+            container.innerHTML += html;
+        });
+    }
+
+    // ============================================
+    // COMMERCIAL FIBER TABLE
+    // ============================================
+    function renderCommercialTable() {
+        const tbody = document.getElementById('commercialTableBody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        COMMERCIAL_MARKETS.forEach(row => {
+            tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50/50">
+                <td class="py-2.5 px-3 text-xs font-medium">${row.region}</td>
+                <td class="py-2.5 px-3 text-xs">${row.markets}</td>
+                <td class="py-2.5 px-3 text-xs font-medium">${row.routeMiles}</td>
+                <td class="py-2.5 px-3 text-xs text-slate-500">${row.notes}</td>
+            </tr>`;
+        });
+    }
+
+    // ============================================
+    // AT&T OVERLAP TAB
+    // ============================================
+    function renderATTOverlap() {
+        // States list
+        const statesEl = document.getElementById('attOverlapStates');
+        const attStates = ['AL','AR','FL','GA','KY','MS','MO','NC','OH','OK','SC','TX'];
+        statesEl.innerHTML = attStates.map(s => `<span class="inline-block px-2 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium mr-1 mb-1">${s}</span>`).join('');
+
+        // Table
+        const tbody = document.getElementById('attOverlapTable');
+        tbody.innerHTML = '';
+        OVERLAP_MATRIX.filter(r => r.att).forEach(r => {
+            tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50/50">
+                <td class="py-2 px-3 text-xs font-medium">${r.market}</td>
+                <td class="py-2 px-3 text-xs">${r.state}</td>
+                <td class="py-2 px-3 text-xs">${r.att === 'core' ? '<span class="text-red-600 font-bold">ILEC Core</span>' : r.att === 'expanding' ? '<span class="text-amber-600">Expanding</span>' : '<span class="text-blue-600">Active</span>'}</td>
+                <td class="py-2 px-3 text-xs">${r.kinetic === 'core' ? 'ILEC Core' : 'Active'}</td>
+                <td class="py-2 px-3">${riskBadge(r.risk)}</td>
+                <td class="py-2 px-3 text-xs text-slate-500">${r.notes}</td>
+            </tr>`;
+        });
+    }
+
+    // ============================================
+    // VZ / FRONTIER OVERLAP TAB
+    // ============================================
+    function renderVZOverlap() {
+        const tbody = document.getElementById('vzOverlapTable');
+        tbody.innerHTML = '';
+        OVERLAP_MATRIX.filter(r => r.verizon || r.frontier).forEach(r => {
+            const vzStatus = r.verizon ? (r.verizon === 'active' ? '<span class="text-red-600">Fios Active</span>' : r.verizon) : '—';
+            const ftrStatus = r.frontier ? (r.frontier === 'active' ? '<span class="text-red-600">Active</span>' : r.frontier) : '—';
+            tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50/50">
+                <td class="py-2 px-3 text-xs font-medium">${r.market}</td>
+                <td class="py-2 px-3 text-xs">${r.state}</td>
+                <td class="py-2 px-3 text-xs">${vzStatus} / ${ftrStatus}</td>
+                <td class="py-2 px-3 text-xs">${r.kinetic === 'core' ? 'ILEC Core' : 'Active'}</td>
+                <td class="py-2 px-3">${riskBadge(r.risk)}</td>
+                <td class="py-2 px-3 text-xs text-slate-500">${r.notes}</td>
+            </tr>`;
+        });
+    }
+
+    // ============================================
+    // T-MOBILE PORTFOLIO OVERLAP TAB
+    // ============================================
+    function renderTMOOverlap() {
+        const tbody = document.getElementById('tmoOverlapTable');
+        tbody.innerHTML = '';
+        OVERLAP_MATRIX.filter(r => r.metronet || r.lumos).forEach(r => {
+            const metStatus = r.metronet ? `<span class="text-amber-600 font-medium">${r.metronet}</span>` : '—';
+            const lumStatus = r.lumos ? `<span class="text-green-600 font-medium">${r.lumos}</span>` : '—';
+            tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50/50">
+                <td class="py-2 px-3 text-xs font-medium">${r.market}</td>
+                <td class="py-2 px-3 text-xs">${r.state}</td>
+                <td class="py-2 px-3 text-xs">${metStatus}</td>
+                <td class="py-2 px-3 text-xs">${lumStatus}</td>
+                <td class="py-2 px-3 text-xs">${r.kinetic === 'core' ? 'ILEC Core' : 'Active'}</td>
+                <td class="py-2 px-3 text-xs text-slate-500">${r.notes}</td>
+            </tr>`;
+        });
+    }
+
+    // ============================================
+    // OVERLAP MATRIX TABLE
+    // ============================================
+    function renderOverlapTable() {
+        const tbody = document.getElementById('overlapTableBody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        OVERLAP_MATRIX.forEach(row => {
+            const isHigh = row.risk === 'HIGH';
+            const tr = document.createElement('tr');
+            tr.className = `border-b border-slate-100 hover:bg-slate-50/50 ${isHigh ? 'bg-red-50' : ''}`;
+            tr.innerHTML = `
+                <td class="py-2.5 px-3 text-xs font-medium">${row.market}</td>
+                <td class="py-2.5 px-3 text-xs">${row.state}</td>
+                <td class="py-2.5 px-2 text-center">${overlapCell(row.kinetic)}</td>
+                <td class="py-2.5 px-2 text-center">${overlapCell(row.att)}</td>
+                <td class="py-2.5 px-2 text-center">${overlapCell(row.verizon)}</td>
+                <td class="py-2.5 px-2 text-center">${overlapCell(row.frontier)}</td>
+                <td class="py-2.5 px-2 text-center">${overlapCell(row.metronet)}</td>
+                <td class="py-2.5 px-2 text-center">${overlapCell(row.lumos)}</td>
+                <td class="py-2.5 px-2 text-center">${overlapCell(row.spectrum)}</td>
+                <td class="py-2.5 px-3">${riskBadge(row.risk)}</td>
+                <td class="py-2.5 px-3 text-xs text-slate-500">${row.notes}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // ============================================
+    // COMP TABLE
+    // ============================================
+    function renderCompTable() {
+        const tbody = document.getElementById('compTableBody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        COMP_TABLE.forEach(row => {
+            tbody.innerHTML += `<tr class="border-b border-slate-100 hover:bg-slate-50/50">
+                <td class="py-2 px-3 text-xs font-medium">${row.transaction}</td>
+                <td class="py-2 px-3 text-xs">${row.perHHP}</td>
+                <td class="py-2 px-3 text-xs">${row.multiple}</td>
+                <td class="py-2 px-3 text-xs">${row.date}</td>
+                <td class="py-2 px-3 text-xs text-slate-500">${row.notes}</td>
+            </tr>`;
+        });
+    }
+
+    // ============================================
+    // BDC COVERAGE SHADING
+    // ============================================
+    const bdcLayers = {};
+    const bdcActive = {};
+    ['kinetic','att','verizon','frontier','metronet'].forEach(k => {
+        bdcLayers[k] = L.layerGroup().addTo(map);
+        bdcActive[k] = (k === 'kinetic'); // Only Kinetic on by default
+        if (k !== 'kinetic') map.removeLayer(bdcLayers[k]);
+    });
+
+    function renderAllBDC() {
+        Object.entries(BDC_DATA).forEach(([key, coverage]) => {
+            if (!coverage || !coverage.features) return;
+            const prov = PROVIDERS[key];
+            if (!prov) return;
+            coverage.features.forEach(f => {
+                if (!f.geometry) return;
+                const coords = f.geometry.type === 'MultiPolygon'
+                    ? f.geometry.coordinates.map(p => p.map(r => r.map(c => [c[1], c[0]])))
+                    : f.geometry.coordinates.map(r => r.map(c => [c[1], c[0]]));
+                const density = f.properties.density || 0;
+                const opacity = Math.min(0.15 + (density / 500) * 0.45, 0.6);
+                const poly = L.polygon(coords, {
+                    color: prov.color,
+                    fillColor: prov.color,
+                    fillOpacity: opacity,
+                    weight: 0.5,
+                    opacity: 0.4,
+                });
+                poly.bindPopup(bdcPopupHTML(f, prov.name, prov.color), { maxWidth: 350 });
+                bdcLayers[key].addLayer(poly);
+            });
+        });
+        // Update BDC button states
+        Object.keys(bdcActive).forEach(k => {
+            const btn = document.getElementById('bdc-btn-' + k);
+            if (btn) {
+                const hasData = BDC_DATA[k] && BDC_DATA[k].features && BDC_DATA[k].features.length > 0;
+                if (!hasData) {
+                    btn.style.opacity = '0.4';
+                    btn.title = 'No BDC data loaded';
+                }
+            }
+        });
+    }
+
+    function toggleBDCLayer(key) {
+        bdcActive[key] = !bdcActive[key];
+        if (bdcActive[key]) map.addLayer(bdcLayers[key]);
+        else map.removeLayer(bdcLayers[key]);
+        // Update button visual
+        const btn = document.getElementById('bdc-btn-' + key);
+        if (btn) {
+            const prov = PROVIDERS[key];
+            if (bdcActive[key]) {
+                btn.style.background = prov.color;
+                btn.style.color = 'white';
+            } else {
+                btn.style.background = '#E2E8F0';
+                btn.style.color = '#94A3B8';
+            }
+        }
+    }
+
+    // ============================================
+    // INIT
+    // ============================================
+    renderFilterBar();
+    renderRegionButtons();
+    renderQuickNav();
+    renderLegend();
+    renderRiskSummary();
+    renderProfileCards();
+    renderCommercialTable();
+    renderATTOverlap();
+    renderVZOverlap();
+    renderTMOOverlap();
+    renderOverlapTable();
+    renderCompTable();
+    loadBDCScripts();
+
+    </script>
+
+    <!-- Footer -->
+    <div class="text-center text-[10px] text-slate-400 mt-4 mb-2">
+        <p>Confidential &mdash; Prepared March 2026</p>
+        <p>Sources: FCC BDC J25 (Jun 2025), Census 2020, Company Filings, Market Intel</p>
+    </div>
+</body>
+</html>
